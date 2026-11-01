@@ -40,7 +40,7 @@ With the strip setting on, the stack actions in the viewer (Unstack, Keep this, 
 
 Select photos in an album and open the selection's **⋮** menu to **Stack** or **Unstack** them, as on the Photos page (or press `s` to stack). These appear when every selected photo is yours.
 
-After any change to a stack, the album reloads so it shows the right photo for each stack.
+After any change to a stack, and after adding or removing a stacked photo, the album reloads so it shows the right photo for each stack. For example, removing the stack's photo from the album brings its next photo in the album into view with the badge, and adding the stack's primary makes the album show the primary.
 
 | Action                   | What the album shows afterwards                                                                   |
 | ------------------------ | ------------------------------------------------------------------------------------------------- |

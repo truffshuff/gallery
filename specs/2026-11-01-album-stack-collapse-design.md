@@ -68,6 +68,13 @@ patch is wrong: the server picks the member that stands for the stack, and the u
 member, including photos the album does not hold. With `albumId` and `withStacked` the manager reloads
 the album instead (`#reloadAlbumStacks`). Closing the viewer scrolls back to the asset it showed.
 
+Album membership changes reload for the same reason. Removing the photo that stands for a stack (remove
+from album, trash, delete: every path ends in `removeAssets`) leaves its stack-mates in the album but never
+loaded, and adding a photo from the viewer (the strip offers stack members the album does not hold) can
+outrank the one shown, as the primary does. So `removeAssets` reloads when a removed photo carried a stack,
+and `AlbumAddAssets` for this album reloads. The picker's own adds need no reload: its options carry no
+`albumId`, and leaving the picker reloads anyway.
+
 Both album pages' selection menus offer **Stack** and **Unstack** (`AlbumStackBulkActions.svelte`, the
 `/photos` bulk actions) when every selected photo is the caller's, since stacking is owner-only filing
 (`StackService.create`), and not over search results.
@@ -105,6 +112,7 @@ just the album. Outside an album the prompt is upstream's.
   `stackCountInAlbum`, and the album-stack endpoint (owner narrowed; non-owner viewer and stranger refused).
 - `server/test/medium/specs/utils/rbac-oracle.medium.spec.ts` ("album stacks"): the endpoint per actor.
 - `web/src/lib/managers/timeline-manager/timeline-manager.svelte.spec.ts` ("album timeline with stacked
-  photos"): stack events reload the album and never insert outside members.
+  photos"): stack events and membership changes reload the album, and stack events never insert outside
+  members.
 - `web/src/lib/gallery/stack/*.spec.ts`, and "album stack count setting" in
   `filtered-timeline-controller.svelte.spec.ts`.

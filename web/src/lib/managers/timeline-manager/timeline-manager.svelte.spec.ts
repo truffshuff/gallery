@@ -1301,6 +1301,35 @@ describe('TimelineManager', () => {
       expect(sdkMock.getTimeBuckets).toHaveBeenCalledTimes(reloads + 1);
       expect(timelineManager.getTimelineMonthByAssetId(outsider.id)).toBeUndefined();
     });
+
+    // Removing (from the album, or to the trash) the photo that stands for a stack: a stack-mate may take its place.
+    it('reloads the album when a removed photo stood for a stack, and only then', async () => {
+      const stacked = { ...albumMember(), stack: { id: 'stack-1', primaryAssetId: 'p', assetCount: 3 } };
+      const plain = albumMember();
+      timelineManager.upsertAssets([stacked, plain]);
+      const reloads = sdkMock.getTimeBuckets.mock.calls.length;
+
+      timelineManager.removeAssets([plain.id]);
+      await tick();
+      expect(sdkMock.getTimeBuckets).toHaveBeenCalledTimes(reloads);
+
+      eventManager.emit('AlbumRemoveAssets', { assetIds: [stacked.id], albumIds: ['album-1'] });
+      await tick();
+      expect(sdkMock.getTimeBuckets).toHaveBeenCalledTimes(reloads + 1);
+    });
+
+    // Adding a photo (say the stack's primary, from the viewer's strip) can change which stack-mate shows.
+    it('reloads the album when photos are added to it, not to another album', async () => {
+      const reloads = sdkMock.getTimeBuckets.mock.calls.length;
+
+      eventManager.emit('AlbumAddAssets', { assetIds: ['a'], albumIds: ['other-album'] });
+      await tick();
+      expect(sdkMock.getTimeBuckets).toHaveBeenCalledTimes(reloads);
+
+      eventManager.emit('AlbumAddAssets', { assetIds: ['a'], albumIds: ['album-1'] });
+      await tick();
+      expect(sdkMock.getTimeBuckets).toHaveBeenCalledTimes(reloads + 1);
+    });
   });
 
   describe('album picker timeline', () => {
