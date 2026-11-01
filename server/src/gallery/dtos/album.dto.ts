@@ -35,3 +35,7 @@ const AlbumAddTargetsResponseSchema = z
 
 export class AlbumAddTargetsDto extends createZodDto(AlbumAddTargetsSchema) {}
 export class AlbumAddTargetsResponseDto extends createZodDto(AlbumAddTargetsResponseSchema) {}
+
+export class AlbumStackParamDto extends createZodDto(
+  z.object({ id: z.uuidv4(), stackId: z.uuidv4() }).meta({ id: 'AlbumStackParamDto' }),
+) {}

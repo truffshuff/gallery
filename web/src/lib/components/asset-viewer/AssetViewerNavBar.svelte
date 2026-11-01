@@ -14,6 +14,7 @@
   import { getGlobalActions } from '$lib/services/app.service';
   import { getAssetActions } from '$lib/services/asset.service';
   import { getSpatialSceneActions } from '$lib/gallery/spatial/spatial-scene.svelte';
+  import { viewerAlbumId } from '$lib/gallery/stack/album-stack-strip';
   import { getPersonAssetActions } from '$lib/services/person.service';
   import { getStackActions } from '$lib/services/stack.service';
   import { getSharedLink, withoutIcons } from '$lib/utils';
@@ -93,7 +94,7 @@
   const Actions = $derived(
     getAssetActions($t, { ...asset, stackPrimaryAssetId: stack?.primaryAssetId }, { space, album }),
   );
-  const StackActions = $derived(getStackActions($t, stack, asset));
+  const StackActions = $derived(getStackActions($t, stack, asset, !!viewerAlbumId(album)));
   const SpatialActions = $derived(getSpatialSceneActions($t, asset));
   const sharedLink = getSharedLink();
 </script>

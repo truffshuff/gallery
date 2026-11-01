@@ -75,6 +75,8 @@
   import AlbumDescription from '$lib/components/album-page/AlbumDescription.svelte';
   import AlbumTitle from '$lib/components/album-page/AlbumTitle.svelte';
   import ActionMenuItem from '$lib/components/ActionMenuItem.svelte';
+  import AlbumStackBulkActions from '$lib/gallery/stack/AlbumStackBulkActions.svelte';
+  import AlbumStackMenuOptions from '$lib/gallery/stack/AlbumStackMenuOptions.svelte';
 
   interface Props {
     data: PageData;
@@ -541,6 +543,7 @@
             <ChangeLocation menuItem />
             <ArchiveAction menuItem unarchive={assetMultiSelectManager.isAllArchived} onArchive={filtered.onArchive} />
             <SetVisibilityAction menuItem onVisibilitySet={handleSetVisibility} />
+            {#if !filtered.showSearchResults}<AlbumStackBulkActions />{/if}
           {/if}
           {#if isEditor && assetMultiSelectManager.assets.length === 1}
             <MenuOption
@@ -615,6 +618,7 @@
                     onClick={() => timelineManager.toggleShowAssetOwners()}
                   />
                 {/if}
+                <AlbumStackMenuOptions />
                 <ActionMenuItem action={Actions.Options} />
                 {#if isOwned && album.assetCount > 0}
                   <MenuOption

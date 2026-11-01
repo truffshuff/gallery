@@ -438,6 +438,8 @@
     "storage_usage_settings_description": "Festlegen, ob vom Server generierte Dateien zur Speichernutzung der Nutzer zählen"
   },
   "album_linked_to_space": "Mit \"{space}\" verknüpft",
+  "album_stack_count_in_album": "In Stapeln nur die Fotos dieses Albums zählen",
+  "album_stack_strip_in_album": "Beim Öffnen eines Stapels nur die Fotos dieses Albums zeigen",
   "all_albums_and_spaces": "Alle",
   "apply_changes": "Änderungen übernehmen",
   "asset_count": "Anzahl der Dateien",
@@ -787,6 +789,7 @@
   "cmdk_typed_search_choices_heading": "Filterwert auswählen",
   "cmdk_typed_search_issues_heading": "Suchfilter",
   "cmdk_unnamed_person": "Unbenannte Person",
+  "confirm_keep_this_delete_others_in_album": "{count, plural, one {Die andere Datei im Stapel wird} other {Die # anderen Dateien im Stapel werden}} aus deiner Bibliothek gelöscht, nicht nur aus diesem Album entfernt. Bist du sicher, dass du fortfahren möchtest?",
   "create_group": "Gruppe erstellen",
   "create_space": "Geteilten Space erstellen",
   "crop_faces_from_photo": "Gesichter aus dem Foto zuschneiden",

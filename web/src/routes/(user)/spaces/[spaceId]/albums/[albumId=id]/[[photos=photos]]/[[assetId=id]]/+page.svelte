@@ -10,6 +10,8 @@
   import FilterToggleButton from '$lib/components/filter-panel/filter-toggle-button.svelte';
   import ActiveFiltersBar from '$lib/components/filter-panel/active-filters-bar.svelte';
   import ControlAppBar from '$lib/components/shared-components/ControlAppBar.svelte';
+  import ButtonContextMenu from '$lib/components/shared-components/context-menu/ButtonContextMenu.svelte';
+  import AlbumStackMenuOptions from '$lib/gallery/stack/AlbumStackMenuOptions.svelte';
   import SelectionToolbar from '$lib/components/timeline/SelectionToolbar.svelte';
   import Timeline from '$lib/components/timeline/Timeline.svelte';
   import ScopedSearchButton from '$lib/components/search/scoped-search-button.svelte';
@@ -38,7 +40,7 @@
   import HeaderActionButton from '$lib/components/HeaderActionButton.svelte';
   import { Icon, IconButton, modalManager, toastManager } from '@immich/ui';
   import { handleError } from '$lib/utils/handle-error';
-  import { mdiArrowLeft, mdiImageOutline, mdiImagePlusOutline, mdiLink } from '@mdi/js';
+  import { mdiArrowLeft, mdiDotsVertical, mdiImageOutline, mdiImagePlusOutline, mdiLink } from '@mdi/js';
   import { t } from 'svelte-i18n';
   import type { PageData } from './$types';
 
@@ -255,6 +257,17 @@
         icon={mdiLink}
       />
     {/if}
+    {#if mode === 'browse'}
+      <!-- The album page keeps these in its options menu; this page has no other per-album options. -->
+      <ButtonContextMenu
+        icon={mdiDotsVertical}
+        title={$t('album_options')}
+        color="secondary"
+        offset={{ x: 175, y: 25 }}
+      >
+        <AlbumStackMenuOptions />
+      </ButtonContextMenu>
+    {/if}
   {/snippet}
 
   {#if mode === 'browse'}
@@ -356,6 +369,7 @@
             isSelectionMode={false}
             singleSelect={false}
             space={{ id: space.id, canWrite: isSpaceEditor }}
+            withStacked
             {...filtered.timelineProps}
           >
             <!-- Editable album header (Timeline leading content — always rendered, incl. for an empty

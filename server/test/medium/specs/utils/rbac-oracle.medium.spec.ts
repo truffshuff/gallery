@@ -16,6 +16,7 @@ import { SearchOptionsRequestDto, searchOptionsDimensions } from 'src/gallery/dt
 import { FilterSuggestionRepository } from 'src/gallery/repositories/filter-suggestion.repository.js';
 import { SmartFacetRepository } from 'src/gallery/repositories/smart-facet.repository.js';
 import { SpaceAlbumRepository } from 'src/gallery/repositories/space-album.repository.js';
+import { GalleryAlbumService } from 'src/gallery/services/gallery-album.service.js';
 import { GallerySearchService } from 'src/gallery/services/gallery-search.service.js';
 import { AccessRepository } from 'src/repositories/access.repository.js';
 import { AlbumUserRepository } from 'src/repositories/album-user.repository.js';
@@ -310,6 +311,7 @@ const seed = async () => {
       space: space.id,
       ownAlbum: ownAlbum.id,
       spaceAlbum: spaceAlbum.id,
+      stack: stack.id,
       tagSpace,
       pet: pet.personGroupId,
       memories: { memOwner, memViewer },
@@ -842,6 +844,27 @@ describe('viewer-scope RBAC oracle', () => {
             stacks
               .map(({ id, assets }) => ({ stack: name(id), assets: assetList(assets) }))
               .toSorted((a, b) => a.stack.localeCompare(b.stack)),
+        ),
+      };
+    }
+    expect(result).toMatchSnapshot();
+  });
+
+  // GET /albums/{id}/stacks/{stackId}: a stack narrowed to an album's members, so it must never show an actor more
+  // than GET /stacks/{id} (the `stacks` cell above) does.
+  it('album stacks', async () => {
+    const sut = world.ctx.getService(GalleryAlbumService);
+    const { ownAlbum, spaceAlbum, stack } = world.ids;
+    const result: Record<string, unknown> = {};
+    for (const [actor, auth] of Object.entries(world.actors)) {
+      result[actor] = {
+        ownAlbum: await attempt(
+          () => sut.getStack(auth, ownAlbum, stack),
+          ({ assets }) => assetList(assets),
+        ),
+        spaceAlbum: await attempt(
+          () => sut.getStack(auth, spaceAlbum, stack),
+          ({ assets }) => assetList(assets),
         ),
       };
     }

@@ -31,6 +31,7 @@ import {
   CalendarHeatmapType,
   TimeBucketSize,
 } from 'src/enum.js';
+import { albumStackBadge, withAlbumStackCollapse } from 'src/gallery/utils/album-stack-collapse.js';
 import { withOwnArchiveOnly } from 'src/gallery/utils/favorites-scope.js';
 import { projectedDuration } from 'src/gallery/utils/projected-duration.js';
 import { stackHasSeveralLiveAssets } from 'src/gallery/utils/stack-badge.js';
@@ -462,7 +463,8 @@ export function withTimeBucketAssetFilters<O>(
         ),
       )
       .$if(!!options.identityIds?.length, (qb) => hasFaceIdentities(qb, options.identityIds!))
-      .$if(!!options.withStacked, (qb) =>
+      .$call((qb) => withAlbumStackCollapse(qb, options, viewerId))
+      .$if(!!options.withStacked && !options.albumId, (qb) =>
         qb
           .leftJoin('stack', (join) =>
             join.onRef('stack.id', '=', 'asset.stackId').onRef('stack.primaryAssetId', '=', 'asset.id'),
@@ -1500,6 +1502,7 @@ export class AssetRepository {
                     .whereRef('stacked.stackId', '=', 'asset.stackId')
                     .where('stacked.deletedAt', 'is', null)
                     .where('stacked.visibility', '=', AssetVisibility.Timeline)
+                    .$if(!!options.albumId, (qb) => qb.where(albumStackBadge(options, auth.user.id)))
                     .groupBy('stacked.stackId')
                     .having(stackHasSeveralLiveAssets)
                     .as('stacked_assets'),

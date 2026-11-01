@@ -173,12 +173,15 @@ export class TimelineManager extends VirtualScrollManager {
           }
         },
         StackCreate: (stack) => {
+          if (this.#reloadAlbumStacks()) {
+            return;
+          }
           if (this.#options.withStacked) {
             updateStackedAssetInTimeline(this, stack);
           }
         },
         StackDelete: ({ assets }) => {
-          if (!this.#options.withStacked) {
+          if (!this.#options.withStacked || this.#reloadAlbumStacks()) {
             return;
           }
           this.update(
@@ -188,7 +191,7 @@ export class TimelineManager extends VirtualScrollManager {
           this.upsertAssets(assets.map((asset) => toTimelineAsset(asset)));
         },
         StackUpdate: (stack) => {
-          if (!this.#options.withStacked) {
+          if (!this.#options.withStacked || this.#reloadAlbumStacks()) {
             return;
           }
           // unstack and re-stack
@@ -416,6 +419,21 @@ export class TimelineManager extends VirtualScrollManager {
     } finally {
       this.suspendTransitions = false;
     }
+  }
+
+  /**
+   * Gallery: an album collapses each stack to one of its own members, picked by the server
+   * (`album-stack-collapse.ts`), so a local patch cannot know which member to show and would insert
+   * stack members the album does not hold. Reload the album instead.
+   */
+  #reloadAlbumStacks() {
+    if (!this.#options.withStacked || !this.#options.albumId) {
+      return false;
+    }
+    const options = this.#options;
+    this.#options = TimelineManager.#INIT_OPTIONS;
+    void this.updateOptions(options);
+    return true;
   }
 
   async #init(options: TimelineManagerOptions) {
