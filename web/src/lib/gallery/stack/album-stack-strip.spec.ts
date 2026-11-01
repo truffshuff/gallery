@@ -3,7 +3,7 @@ import { sdkMock } from '$lib/__mocks__/sdk.mock';
 import { albumStackPreferences } from '$lib/gallery/stack/album-stack-preferences.svelte';
 import { assetFactory } from '@test-data/factories/asset-factory';
 import { reactivePageMock } from '@test-data/mocks/reactive-page.mock.svelte';
-import { loadAlbumStackStripIds, stackStrip, viewerAlbumId } from './album-stack-strip';
+import { albumStackSuccessor, loadAlbumStackStripIds, stackStrip, viewerAlbumId } from './album-stack-strip';
 
 vi.mock('$app/state', async () => {
   const { reactivePageMock } = await import('@test-data/mocks/reactive-page.mock.svelte');
@@ -27,7 +27,9 @@ describe('album stack strip', () => {
     expect(viewerAlbumId({ id: 'album-1' })).toBe('album-1');
     expect(viewerAlbumId()).toBeUndefined();
 
-    reactivePageMock.reset('http://localhost/spaces/s1/albums/album-2', { params: { spaceId: 's1', albumId: 'album-2' } });
+    reactivePageMock.reset('http://localhost/spaces/s1/albums/album-2', {
+      params: { spaceId: 's1', albumId: 'album-2' },
+    });
     expect(viewerAlbumId()).toBe('album-2');
   });
 
@@ -54,6 +56,37 @@ describe('album stack strip', () => {
     sdkMock.getAlbumStack.mockRejectedValue(new Error('boom'));
 
     await expect(loadAlbumStackStripIds('stack-1', 'album-1')).resolves.toBeUndefined();
+  });
+
+  describe('albumStackSuccessor', () => {
+    const removed = { ...a, stack: { id: 'stack-1', primaryAssetId: a.id, assetCount: 3 } };
+
+    it('moves to the earliest stack-mate the album still holds once the primary leaves it', async () => {
+      const later = { ...b, fileCreatedAt: '2026-03-02T12:00:00.000Z' };
+      const earlier = { ...c, fileCreatedAt: '2026-03-01T12:00:00.000Z' };
+      sdkMock.getAlbumStack.mockResolvedValue({ ...stack, assets: [later, earlier] });
+
+      await expect(albumStackSuccessor('album-1', removed)).resolves.toBe(earlier);
+      expect(sdkMock.getAlbumStack).toHaveBeenCalledWith({ id: 'album-1', stackId: 'stack-1' });
+    });
+
+    it('prefers the primary when the album still holds it', async () => {
+      const shown = { ...b, stack: { id: 'stack-1', primaryAssetId: a.id, assetCount: 3 } };
+      sdkMock.getAlbumStack.mockResolvedValue({ ...stack, assets: [c, a] });
+
+      await expect(albumStackSuccessor('album-1', shown)).resolves.toBe(a);
+    });
+
+    it('has none for an unstacked photo, a stack the album no longer holds, or a failed lookup', async () => {
+      await expect(albumStackSuccessor('album-1', { ...a, stack: null })).resolves.toBeUndefined();
+      expect(sdkMock.getAlbumStack).not.toHaveBeenCalled();
+
+      sdkMock.getAlbumStack.mockResolvedValue({ ...stack, assets: [] });
+      await expect(albumStackSuccessor('album-1', removed)).resolves.toBeUndefined();
+
+      sdkMock.getAlbumStack.mockRejectedValue(new Error('not the owner'));
+      await expect(albumStackSuccessor('album-1', removed)).resolves.toBeUndefined();
+    });
   });
 
   it('shows no strip when the album holds fewer than two of the stack', () => {

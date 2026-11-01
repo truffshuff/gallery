@@ -73,7 +73,9 @@ from album, trash, delete: every path ends in `removeAssets`) leaves its stack-m
 loaded, and adding a photo from the viewer (the strip offers stack members the album does not hold) can
 outrank the one shown, as the primary does. So `removeAssets` reloads when a removed photo carried a stack,
 and `AlbumAddAssets` for this album reloads. The picker's own adds need no reload: its options carry no
-`albumId`, and leaving the picker reloads anyway.
+`albumId`, and leaving the picker reloads anyway. Removing the shown photo from the album inside the viewer moves the viewer to the stack-mate that now
+stands for the stack (`albumStackSuccessor`, from `GET /albums/{id}/stacks/{stackId}`, the server's rank),
+and only when the album holds none of the stack to the album's next photo, as upstream does.
 
 Both album pages' selection menus offer **Stack** and **Unstack** (`AlbumStackBulkActions.svelte`, the
 `/photos` bulk actions) when every selected photo is the caller's, since stacking is owner-only filing
