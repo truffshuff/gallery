@@ -77,7 +77,18 @@ describe('album stack strip', () => {
       await expect(albumStackSuccessor('album-1', shown)).resolves.toBe(a);
     });
 
+    it('looks the stack up for a photo picked in the strip, whose record carries none', async () => {
+      const picked = { ...b, stack: undefined };
+      sdkMock.getAssetInfo.mockResolvedValue({ ...b, stack: { id: 'stack-1', primaryAssetId: a.id, assetCount: 3 } });
+      sdkMock.getAlbumStack.mockResolvedValue({ ...stack, assets: [b, c] });
+
+      await expect(albumStackSuccessor('album-1', picked)).resolves.toBe(c);
+      expect(sdkMock.getAssetInfo).toHaveBeenCalledWith({ id: b.id });
+      expect(sdkMock.getAlbumStack).toHaveBeenCalledWith({ id: 'album-1', stackId: 'stack-1' });
+    });
+
     it('has none for an unstacked photo, a stack the album no longer holds, or a failed lookup', async () => {
+      sdkMock.getAssetInfo.mockResolvedValue({ ...a, stack: null });
       await expect(albumStackSuccessor('album-1', { ...a, stack: null })).resolves.toBeUndefined();
       expect(sdkMock.getAlbumStack).not.toHaveBeenCalled();
 

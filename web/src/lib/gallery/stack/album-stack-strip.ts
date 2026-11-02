@@ -1,4 +1,4 @@
-import { getAlbumStack, type AssetResponseDto, type StackResponseDto } from '@immich/sdk';
+import { getAlbumStack, getAssetInfo, type AssetResponseDto, type StackResponseDto } from '@immich/sdk';
 import { page } from '$app/state';
 import { albumStackPreferences } from '$lib/gallery/stack/album-stack-preferences.svelte';
 
@@ -27,15 +27,17 @@ export const loadAlbumStackStripIds = async (stackId: string, albumId: string | 
 /**
  * The photo that stands for `asset`'s stack in the album once `asset` has left it (remove from album in the viewer): the
  * server's pick among the stack-mates the album still holds, the primary first, then the earliest. The viewer moves
- * there rather than to the album's next photo. `undefined` when `asset` had no stack, the album holds no other member,
- * or the lookup fails (the stack is another user's).
+ * there rather than to the album's next photo. `undefined` when `asset` has no stack, the album holds no other member,
+ * or a lookup fails (the stack is another user's).
  */
 export const albumStackSuccessor = async (albumId: string, asset: AssetResponseDto) => {
-  if (!asset.stack) {
-    return;
-  }
   try {
-    const { assets, primaryAssetId } = await getAlbumStack({ id: albumId, stackId: asset.stack.id });
+    // A photo picked in the stack strip comes from `GET /stacks/{id}`, whose assets carry no `stack`.
+    const stackId = asset.stack?.id ?? (await getAssetInfo({ id: asset.id })).stack?.id;
+    if (!stackId) {
+      return;
+    }
+    const { assets, primaryAssetId } = await getAlbumStack({ id: albumId, stackId });
     const rest = assets.filter(({ id }) => id !== asset.id);
     return (
       rest.find(({ id }) => id === primaryAssetId) ??
