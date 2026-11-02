@@ -106,9 +106,14 @@ just the album. Outside an album the prompt is upstream's.
 ## Version pairings
 
 - **Web and server** ship together, so they never mix.
-- **Mobile** (any version) does not send `withStacked` or `stackCountInAlbum` on album pages, nor call
-  the album-stack endpoint, and is unchanged. Its album pages, including the space-album detail (E21),
-  still show every photo.
+- **Mobile** collapses on the device: its album timelines are local Drift queries, so
+  `mobile/lib/gallery/stacks/album_stack_collapse.dart` applies the same rule (rank by primary, then
+  `created_at`, which is synced from `fileCreatedAt`, then id; siblings must pass the same membership,
+  visibility and temporal scope; only the signed-in user's stacks) to the album and space-album routes in
+  `SharedSpaceTimelineRepository`. It needs no server change, so it works against older servers; an older app
+  shows every photo, as before. Mobile has no settings: its stack badge has no count, and the viewer's strip
+  always shows the whole stack. Local `stack_entity` holds only the user's and partners' stacks, which the
+  owner-only rule needs anyway.
 - **Stock Immich clients** do not send `withStacked` with `albumId`. A third-party client that does
   gets this collapse instead of upstream's primary-only one: the same result when the album holds the
   primary, one photo instead of none when it does not. `stackCountInAlbum` and the endpoint are additions

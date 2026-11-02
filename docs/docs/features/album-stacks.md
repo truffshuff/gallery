@@ -5,7 +5,7 @@ A stack groups related photos, such as a burst, a RAW and its JPEG, or several t
 Albums on the web now show stacks the same way. Before, an album showed each stacked photo on its own, and only opening one revealed that it belonged to a stack.
 
 :::note
-This is a web feature. Album pages in the mobile app still show every stacked photo separately.
+The mobile app collapses stacks in albums and in a space's albums the same way. The settings below are web-only: on the phone the stack icon carries no count, and opening a stack always shows all of its photos.
 :::
 
 ## Which photo an album shows
