@@ -1318,6 +1318,20 @@ describe('TimelineManager', () => {
       expect(sdkMock.getTimeBuckets).toHaveBeenCalledTimes(reloads + 1);
     });
 
+    // The manager's own listener and the album page's AlbumStackEvents both fire for one event (Safari can miss the
+    // former): one reload, and the page's options effect during it does not start another.
+    it('runs one reload for triggers in the same task, and keeps its options while reloading', async () => {
+      const reloads = sdkMock.getTimeBuckets.mock.calls.length;
+
+      expect(timelineManager.reloadAlbumStacks()).toBe(true);
+      expect(timelineManager.reloadAlbumStacks()).toBe(true);
+      eventManager.emit('AlbumAddAssets', { assetIds: ['a'], albumIds: ['album-1'] });
+      await timelineManager.updateOptions({ albumId: 'album-1', withStacked: true });
+      await tick();
+
+      expect(sdkMock.getTimeBuckets).toHaveBeenCalledTimes(reloads + 1);
+    });
+
     // Adding a photo (say the stack's primary, from the viewer's strip) can change which stack-mate shows.
     it('reloads the album when photos are added to it, not to another album', async () => {
       const reloads = sdkMock.getTimeBuckets.mock.calls.length;

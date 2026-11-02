@@ -140,6 +140,7 @@ export class TimelineManager extends VirtualScrollManager {
   #destroyed = false;
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
   #coverRequested = new Set<string>();
+  #albumReloadQueued = false;
 
   get showAssetOwners() {
     return userPreferencesManager.showAssetOwners;
@@ -175,11 +176,11 @@ export class TimelineManager extends VirtualScrollManager {
         // Gallery: a photo added to a stacked album can outrank the stack-mate it shows (the primary does).
         AlbumAddAssets: ({ albumIds }) => {
           if (this.#options.albumId && albumIds.includes(this.#options.albumId)) {
-            this.#reloadAlbumStacks();
+            this.reloadAlbumStacks();
           }
         },
         StackCreate: (stack) => {
-          if (this.#reloadAlbumStacks()) {
+          if (this.reloadAlbumStacks()) {
             return;
           }
           if (this.#options.withStacked) {
@@ -187,7 +188,7 @@ export class TimelineManager extends VirtualScrollManager {
           }
         },
         StackDelete: ({ assets }) => {
-          if (!this.#options.withStacked || this.#reloadAlbumStacks()) {
+          if (!this.#options.withStacked || this.reloadAlbumStacks()) {
             return;
           }
           this.update(
@@ -197,7 +198,7 @@ export class TimelineManager extends VirtualScrollManager {
           this.upsertAssets(assets.map((asset) => toTimelineAsset(asset)));
         },
         StackUpdate: (stack) => {
-          if (!this.#options.withStacked || this.#reloadAlbumStacks()) {
+          if (!this.#options.withStacked || this.reloadAlbumStacks()) {
             return;
           }
           // unstack and re-stack
@@ -415,7 +416,10 @@ export class TimelineManager extends VirtualScrollManager {
     if (this.#options !== TimelineManager.#INIT_OPTIONS && isEqual(this.#options, options)) {
       return;
     }
+    await this.#reload(options);
+  }
 
+  async #reload(options: TimelineManagerOptions) {
     this.suspendTransitions = true;
     try {
       await this.initTask.reset();
@@ -431,15 +435,23 @@ export class TimelineManager extends VirtualScrollManager {
    * Gallery: an album collapses each stack to one of its own members, picked by the server
    * (`album-stack-collapse.ts`), so a local patch cannot know which member to show and would insert
    * stack members the album does not hold. Reload the album instead, after stack edits and after
-   * album membership changes that can change the pick.
+   * album membership changes that can change the pick. The album pages call this from
+   * `AlbumStackEvents` too, because in Safari this manager's own event subscription can miss events;
+   * triggers in the same task share one reload. Returns whether this is a stacked album timeline.
    */
-  #reloadAlbumStacks() {
+  reloadAlbumStacks() {
     if (!this.#options.withStacked || !this.#options.albumId) {
       return false;
     }
-    const options = this.#options;
-    this.#options = TimelineManager.#INIT_OPTIONS;
-    void this.updateOptions(options);
+    if (!this.#albumReloadQueued) {
+      this.#albumReloadQueued = true;
+      queueMicrotask(() => {
+        this.#albumReloadQueued = false;
+        if (!this.#destroyed) {
+          void this.#reload(this.#options);
+        }
+      });
+    }
     return true;
   }
 
@@ -744,7 +756,7 @@ export class TimelineManager extends VirtualScrollManager {
     });
     if (removedStack) {
       // Gallery: the photo stood for a stack in an album; the server picks which stack-mate shows next.
-      this.#reloadAlbumStacks();
+      this.reloadAlbumStacks();
     }
     return [...result.notUpdated];
   }

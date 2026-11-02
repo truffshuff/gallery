@@ -12,6 +12,7 @@
   import ControlAppBar from '$lib/components/shared-components/ControlAppBar.svelte';
   import ButtonContextMenu from '$lib/components/shared-components/context-menu/ButtonContextMenu.svelte';
   import AlbumStackMenuOptions from '$lib/gallery/stack/AlbumStackMenuOptions.svelte';
+  import AlbumStackEvents from '$lib/gallery/stack/AlbumStackEvents.svelte';
   import SelectionToolbar from '$lib/components/timeline/SelectionToolbar.svelte';
   import Timeline from '$lib/components/timeline/Timeline.svelte';
   import ScopedSearchButton from '$lib/components/search/scoped-search-button.svelte';
@@ -216,6 +217,7 @@
 
 <!-- Header shows the space (context/breadcrumb); the album name lives in the editable AlbumTitle in the
      timeline below, mirroring the regular album page (which has no page-header title). -->
+<AlbumStackEvents albumId={album.id} {timelineManager} />
 <UserPageLayout hideNavbar={assetMultiSelectManager.selectionActive} title={space.name}>
   {#snippet leading()}
     <IconButton

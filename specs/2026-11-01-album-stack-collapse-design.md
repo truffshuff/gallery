@@ -77,6 +77,13 @@ and `AlbumAddAssets` for this album reloads. The picker's own adds need no reloa
 stands for the stack (`albumStackSuccessor`, from `GET /albums/{id}/stacks/{stackId}`, the server's rank),
 and only when the album holds none of the stack to the album's next photo, as upstream does.
 
+The reload triggers reach the manager twice. `TimelineManager` subscribes to the events in its constructor, and the
+album pages also mount `AlbumStackEvents` (an `OnEvents` subscriber) that calls the public `reloadAlbumStacks()`. In
+Safari the constructor's subscription, made while `Timeline` renders, was seen to miss `AlbumAddAssets` and
+`AlbumRemoveAssets` while every `OnEvents` listener received them (console trace, 2026-11-01); a subscription made in
+`onMount` does not. `reloadAlbumStacks()` runs one reload per task, so both firing costs nothing, and it reloads with the
+current options instead of blanking them, which had let the page's options effect start extra reloads meanwhile.
+
 Both album pages' selection menus offer **Stack** and **Unstack** (`AlbumStackBulkActions.svelte`, the
 `/photos` bulk actions) when every selected photo is the caller's, since stacking is owner-only filing
 (`StackService.create`), and not over search results.
