@@ -196,6 +196,7 @@ export const addAssetsToAlbumWithOutcome = async (
     if (notify) {
       notifyAddToAlbum($t, albumId, assetIds, results);
     }
+    console.info('[album-stacks emit] AlbumAddAssets', { assetIds, albumIds: [albumId], listeners: eventManager.hasListeners('AlbumAddAssets') });
     eventManager.emit('AlbumAddAssets', { assetIds, albumIds: [albumId] });
     return {
       ok: true,

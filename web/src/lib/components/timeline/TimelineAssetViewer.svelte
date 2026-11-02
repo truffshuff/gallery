@@ -114,6 +114,7 @@
   };
 
   const onAlbumRemoveAssets = async ({ assetIds, albumIds }: { assetIds: string[]; albumIds: string[] }) => {
+    console.info('[album-stacks viewer] AlbumRemoveAssets', { assetIds, current: assetCursor.current.id, hasStack: !!assetCursor.current.stack, album: album?.id });
     if (!!album && albumIds.includes(album.id) && assetIds.includes(assetCursor.current.id)) {
       // eslint-disable-next-line @typescript-eslint/no-unused-expressions
       (await navigateToAsset(await albumStackSuccessor(album.id, assetCursor.current))) ||

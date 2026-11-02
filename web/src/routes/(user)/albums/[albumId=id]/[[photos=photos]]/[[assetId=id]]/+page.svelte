@@ -171,6 +171,7 @@
   };
 
   const onAlbumRemoveAssets = async ({ assetIds, albumIds }: { assetIds: string[]; albumIds: string[] }) => {
+    console.info('[album-stacks page] AlbumRemoveAssets', { albumIds, assetIds, albumId: album.id });
     if (albumIds.includes(album.id)) {
       await handleRemoveAssets(assetIds);
     }
@@ -322,6 +323,7 @@
   };
 
   const onAlbumAddAssets = async ({ albumIds, assetIds }: { albumIds: string[]; assetIds: string[] }) => {
+    console.info('[album-stacks page] AlbumAddAssets', { albumIds, assetIds, albumId: album.id, viewMode });
     if (!albumIds.includes(album.id)) {
       return;
     }

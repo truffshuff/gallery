@@ -140,6 +140,16 @@ export class TimelineManager extends VirtualScrollManager {
   #destroyed = false;
   // eslint-disable-next-line svelte/prefer-svelte-reactivity
   #coverRequested = new Set<string>();
+  #dbg = Math.random().toString(36).slice(2, 6);
+  #log(...args: unknown[]) {
+    console.info(`[album-stacks ${this.#dbg}]`, ...args, {
+      albumId: this.#options.albumId,
+      withStacked: this.#options.withStacked,
+      isInitOptions: this.#options === TimelineManager.#INIT_OPTIONS,
+      destroyed: this.#destroyed,
+      initialized: this.isInitialized,
+    });
+  }
 
   get showAssetOwners() {
     return userPreferencesManager.showAssetOwners;
@@ -155,6 +165,7 @@ export class TimelineManager extends VirtualScrollManager {
 
   constructor() {
     super();
+    queueMicrotask(() => this.#log('constructed'));
 
     this.#unsubscribes.push(
       eventManager.on({
@@ -168,12 +179,14 @@ export class TimelineManager extends VirtualScrollManager {
         },
         AssetsUnarchive: (assets) => this.upsertAssets(assets),
         AlbumRemoveAssets: ({ assetIds, albumIds }) => {
+          this.#log('AlbumRemoveAssets event', { assetIds, albumIds });
           if (this.#options.albumId && albumIds.includes(this.#options.albumId)) {
             this.removeAssets(assetIds);
           }
         },
         // Gallery: a photo added to a stacked album can outrank the stack-mate it shows (the primary does).
         AlbumAddAssets: ({ albumIds }) => {
+          this.#log('AlbumAddAssets event', { albumIds });
           if (this.#options.albumId && albumIds.includes(this.#options.albumId)) {
             this.#reloadAlbumStacks();
           }
@@ -407,14 +420,17 @@ export class TimelineManager extends VirtualScrollManager {
 
   async updateOptions(options: TimelineManagerOptions) {
     if (this.#destroyed) {
+      this.#log('updateOptions: destroyed, ignored');
       return;
     }
     if (options.deferInit) {
+      this.#log('updateOptions: deferInit, ignored');
       return;
     }
     if (this.#options !== TimelineManager.#INIT_OPTIONS && isEqual(this.#options, options)) {
       return;
     }
+    this.#log('updateOptions: reinit', { to: { albumId: options.albumId, withStacked: options.withStacked } });
 
     this.suspendTransitions = true;
     try {
@@ -435,8 +451,10 @@ export class TimelineManager extends VirtualScrollManager {
    */
   #reloadAlbumStacks() {
     if (!this.#options.withStacked || !this.#options.albumId) {
+      this.#log('reloadAlbumStacks: skipped (not a stacked album timeline)');
       return false;
     }
+    this.#log('reloadAlbumStacks: reloading');
     const options = this.#options;
     this.#options = TimelineManager.#INIT_OPTIONS;
     void this.updateOptions(options);
@@ -460,6 +478,7 @@ export class TimelineManager extends VirtualScrollManager {
       this.#options = options;
       await this.#initializeTimelineBuckets(signal, sequence);
     }, true);
+    this.#log('init finished', { status, sequence, current: this.#initSequence });
     if (sequence !== this.#initSequence) {
       return;
     }
@@ -475,6 +494,7 @@ export class TimelineManager extends VirtualScrollManager {
   }
 
   public override destroy() {
+    this.#log('destroy');
     this.#destroyed = true;
     this.#initSequence++;
     this.initTask.cancel();
@@ -742,6 +762,7 @@ export class TimelineManager extends VirtualScrollManager {
       removedStack ||= !!asset.stack;
       return { remove: true };
     });
+    this.#log('removeAssets', { ids, removedStack });
     if (removedStack) {
       // Gallery: the photo stood for a stack in an album; the server picks which stack-mate shows next.
       this.#reloadAlbumStacks();
