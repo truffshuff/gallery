@@ -1,5 +1,5 @@
 import { Duration } from 'luxon';
-import { mkdtemp, readFile, rm, unlink } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DiskStorageBackend } from 'src/backends/disk-storage.backend.js';
@@ -175,6 +175,9 @@ export class VideoFaceDetector {
     const tempDir = await mkdtemp(join(tmpdir(), 'gallery-video-faces-'));
     try {
       const tracker = new FaceTracker(facialRecognition.maxDistance);
+      if (process.env.GALLERY_VIDEO_FACES_DUMP_DIR) {
+        await rm(join(process.env.GALLERY_VIDEO_FACES_DUMP_DIR, `${id}.jsonl`), { force: true });
+      }
       const framePaths = new Map<number, string>();
       let frameSize: { width: number; height: number } | undefined;
 
@@ -231,7 +234,24 @@ export class VideoFaceDetector {
         }
 
         frameSize ??= await this.frames.getDimensions(path);
-        tracker.addFrame(t, index, await detectionsIn(path, frameSize));
+        const frameDetections = await detectionsIn(path, frameSize);
+        tracker.addFrame(t, index, frameDetections);
+        // TEMPORARY (issue 1306 experiments, not for merge): record every frame's detections for offline replay.
+        const dumpDir = process.env.GALLERY_VIDEO_FACES_DUMP_DIR;
+        if (dumpDir) {
+          await mkdir(join(dumpDir, id), { recursive: true });
+          const line = {
+            t,
+            frameIndex: index,
+            width: frameSize.width,
+            height: frameSize.height,
+            detections: frameDetections,
+          };
+          await appendFile(join(dumpDir, `${id}.jsonl`), JSON.stringify(line) + '\n');
+          if (frameDetections.length > 0) {
+            await copyFile(path, join(dumpDir, id, `${index}.jpeg`));
+          }
+        }
         framePaths.set(index, path);
 
         // Only the frames someone is best seen in are kept, so the folder never holds the whole video.
