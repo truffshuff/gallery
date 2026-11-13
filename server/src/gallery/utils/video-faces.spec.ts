@@ -202,18 +202,48 @@ describe('FaceTracker', () => {
     expect(tracks[0].sightings).toHaveLength(16);
   });
 
-  it('merges one face found twice in the same frame, keeping the better find of that frame', () => {
+  it('merges a head turn between two samples by continuity, but only between confident views (issue 1306)', () => {
+    // The first view after the turn is 0.7 from alice, too far even for the tracker's relaxation, so it starts a
+    // second track; the views after it settle 0.55 away. The two tracks end up 0.59 apart, in consecutive samples.
+    const turned = normalize([0.3, 0.954, 0, 0]);
+    const settled = normalize([0.45, 0.893, 0, 0]);
+    const run = (score: number) => {
+      const tracker = new FaceTracker(0.5);
+      for (let frame = 0; frame < 3; frame++) {
+        tracker.addFrame(frame + 1, frame, [{ ...detection(alice, box(100)), score }]);
+      }
+      tracker.addFrame(4, 3, [{ ...detection(turned, box(104)), score }]);
+      for (let frame = 4; frame < 7; frame++) {
+        tracker.addFrame(frame + 1, frame, [{ ...detection(settled, box(104)), score }]);
+      }
+      expect(tracker.peopleSoFar()).toBe(2);
+      return tracker.finish();
+    };
+
+    expect(run(0.9)).toHaveLength(1);
+    // Backs and sides of heads score low, and look alike from one person to the next.
+    expect(run(0.5)).toHaveLength(2);
+  });
+
+  it('compares best views only over confident sightings', () => {
+    // Sharp but unconfident views (the back of a head) cannot pull two tracks together on their best views.
+    const turning = [normalize([0.75, 0.66, 0, 0]), normalize([0.3, 0.95, 0, 0])];
+    const away = normalize([0, 1, 0.1, 0]);
+    const frontal = normalize([0.97, 0, 0.24, 0]);
     const tracker = new FaceTracker(0.5);
-    tracker.addFrame(1, 0, [detection(alice, box(100), 0.3), detection(aliceTurned, box(104), 0.6)]);
-    tracker.addFrame(3, 1, [detection(alice, box(110), 0.5)]);
+    let frame = 0;
+    for (let i = 0; i < 3; i++) {
+      tracker.addFrame(frame + 1, frame++, [{ ...detection(alice, box(100), 0.9), score: 0.5 }]);
+    }
+    for (const embedding of [...turning, ...Array.from({ length: 8 }, () => away)]) {
+      tracker.addFrame(frame + 1, frame++, [detection(embedding, box(100), 0.05)]);
+    }
+    frame += 10;
+    for (let i = 0; i < 3; i++) {
+      tracker.addFrame(frame + 1, frame++, [detection(frontal, box(900), 0.9)]);
+    }
 
-    const tracks = tracker.finish();
-
-    expect(tracks).toHaveLength(1);
-    expect(tracks[0].sightings.map(({ t, quality }) => [t, quality])).toEqual([
-      [1, 0.6],
-      [3, 0.5],
-    ]);
+    expect(tracker.finish()).toHaveLength(2);
   });
 
   it('reports the pairs it left apart near the threshold, and why', () => {

@@ -197,7 +197,7 @@ export class VideoFaceDetector {
 
     const tempDir = await mkdtemp(join(tmpdir(), 'gallery-video-faces-'));
     try {
-      const tracker = new FaceTracker(sameFaceDistance);
+      const tracker = new FaceTracker(sameFaceDistance, facialRecognition.minScore);
       if (process.env.GALLERY_VIDEO_FACES_DUMP_DIR) {
         await rm(join(process.env.GALLERY_VIDEO_FACES_DUMP_DIR, `${id}.jsonl`), { force: true });
       }
@@ -401,11 +401,12 @@ export class VideoFaceDetector {
       return;
     }
     const shown = pairs.slice(0, UNMERGED_LOG_LIMIT);
-    for (const { a, b, centroidDistance, embeddingDistance, sightingDistance, continuous, seenTogether } of shown) {
+    for (const { a, b, centroidDistance, embeddingDistance, continuous, seenTogether } of shown) {
       this.deps.logger.debug(
         `Video ${id}: faces best seen at ${roundDistance(a.best.t)}s and ${roundDistance(b.best.t)}s kept apart ` +
-          `(centroids ${roundDistance(centroidDistance)}, best views ${roundDistance(embeddingDistance)}, ` +
-          `closest views ${roundDistance(sightingDistance)}${continuous ? ', in consecutive samples' : ''}, ` +
+          `(centroids ${roundDistance(centroidDistance)}, ` +
+          `best views ${Number.isFinite(embeddingDistance) ? roundDistance(embeddingDistance) : 'not confident'}` +
+          `${continuous ? ', in consecutive samples' : ''}, ` +
           `${plural(a.sightings.length, 'sighting')} and ${b.sightings.length}, ` +
           (seenTogether > 0 ? `seen together in ${plural(seenTogether, 'frame')})` : 'too far apart)'),
       );
