@@ -853,7 +853,8 @@ export class PersonService extends BaseService {
 
       const isCore =
         (matches.length >= machineLearning.facialRecognition.minFaces || !!accessibleIdentityMatch) &&
-        face.asset.visibility === AssetVisibility.Timeline;
+        face.asset.visibility === AssetVisibility.Timeline &&
+        (await this.videoFaces.mayStartPerson(face.id, machineLearning));
       if (!isCore && !deferred) {
         this.logger.debug(`Deferring non-core face ${id} for later processing`);
         await this.jobRepository.queue({

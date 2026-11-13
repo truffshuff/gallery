@@ -48,7 +48,8 @@ const CONSISTENT_MIN_FACE = 32;
 
 /**
 A person whose largest face is narrower than this (short side, frame px) is dropped however confident the detector
-was: no crop of it, even widened, shows who it is, so it would only add a person nobody can name.
+was: no crop of it, even widened, shows who it is, so it would only add a person nobody can name. The admin setting
+`minFaceSize` overrides it.
 */
 const MIN_FACE = 20;
 
@@ -528,51 +529,64 @@ export type ExistingVideoFace = {
   imageWidth: number;
   imageHeight: number;
   box: BoundingBox;
+  /** The face's person, when it has one. */
+  personGroupId?: string | null;
+};
+
+type MatchOptions = { maxDistance: number; frame: { width: number; height: number }; start: number };
+
+/**
+How well an existing face matches a track: its distance to the nearest sighting, under `maxDistance`, or, for a
+single-frame face, `maxDistance` itself when it overlaps a sighting from the first few seconds after `start`, where
+the poster it was found in comes from. Infinity when it does not match.
+*/
+const matchCost = (face: ExistingVideoFace, track: FaceTrack, { maxDistance, frame, start }: MatchOptions) => {
+  let cost = Infinity;
+  if (face.embedding) {
+    for (const sighting of track.sightings) {
+      cost = Math.min(cost, cosineDistance(face.embedding, sighting.embedding));
+    }
+  }
+  if (cost >= maxDistance) {
+    cost = Infinity;
+  }
+
+  if (!face.hasFrame && face.imageWidth > 0 && face.imageHeight > 0) {
+    const scaled = scaleBox(face.box, face, frame);
+    const nearPoster = track.sightings.some(
+      (sighting) => sighting.t <= start + POSTER_WINDOW_SECONDS && iou(scaled, sighting.box) > POSTER_IOU,
+    );
+    if (nearPoster) {
+      // Position is weaker evidence than appearance, so it only wins when no embedding match is closer.
+      cost = Math.min(cost, maxDistance);
+    }
+  }
+  return cost;
 };
 
 /**
-Pairs existing faces with new tracks, one-to-one, best first, so a re-scan keeps face ids and with them people.
-A face matches by embedding (its distance to the nearest sighting), or, for a single-frame face, by overlapping a
-sighting from the first few seconds after `start`, where the poster it was found in comes from.
+Pairs existing faces with new tracks, one-to-one, so a re-scan keeps face ids and with them people. A face with a
+person is matched before one without, so a track several old faces match keeps the name or the recognition result;
+within each group the closest pairs go first.
 */
 export const matchExistingFaces = (
   existing: ExistingVideoFace[],
   tracks: FaceTrack[],
-  { maxDistance, frame, start }: { maxDistance: number; frame: { width: number; height: number }; start: number },
+  options: MatchOptions,
 ): Map<number, string> => {
-  const pairs: { face: string; track: number; cost: number }[] = [];
+  const pairs: { face: string; track: number; cost: number; hasPerson: boolean }[] = [];
   for (const face of existing) {
     for (const [trackIndex, track] of tracks.entries()) {
-      let cost = Infinity;
-      if (face.embedding) {
-        for (const sighting of track.sightings) {
-          cost = Math.min(cost, cosineDistance(face.embedding, sighting.embedding));
-        }
-      }
-      if (cost >= maxDistance) {
-        cost = Infinity;
-      }
-
-      if (!face.hasFrame && face.imageWidth > 0 && face.imageHeight > 0) {
-        const scaled = scaleBox(face.box, face, frame);
-        const nearPoster = track.sightings.some(
-          (sighting) => sighting.t <= start + POSTER_WINDOW_SECONDS && iou(scaled, sighting.box) > POSTER_IOU,
-        );
-        if (nearPoster) {
-          // Position is weaker evidence than appearance, so it only wins when no embedding match is closer.
-          cost = Math.min(cost, maxDistance);
-        }
-      }
-
+      const cost = matchCost(face, track, options);
       if (Number.isFinite(cost)) {
-        pairs.push({ face: face.id, track: trackIndex, cost });
+        pairs.push({ face: face.id, track: trackIndex, cost, hasPerson: !!face.personGroupId });
       }
     }
   }
 
   const matches = new Map<number, string>();
   const takenFaces = new Set<string>();
-  for (const pair of pairs.sort((a, b) => a.cost - b.cost)) {
+  for (const pair of pairs.sort((a, b) => Number(b.hasPerson) - Number(a.hasPerson) || a.cost - b.cost)) {
     if (takenFaces.has(pair.face) || matches.has(pair.track)) {
       continue;
     }
@@ -580,6 +594,35 @@ export const matchExistingFaces = (
     takenFaces.add(pair.face);
   }
   return matches;
+};
+
+/**
+Old faces a re-scan merged into another one: unmatched, but matching a track whose kept face has the same person.
+Usually one person an older tracker split in two, both halves since recognised as them (issue 1306). Deleting such
+a face loses nothing, as the kept face carries the person; an unmatched face whose person differs is left alone.
+*/
+export const absorbedFaces = (
+  existing: ExistingVideoFace[],
+  tracks: FaceTrack[],
+  matches: Map<number, string>,
+  options: MatchOptions,
+): Set<string> => {
+  const matched = new Set(matches.values());
+  const byId = new Map(existing.map((face) => [face.id, face]));
+  const absorbed = new Set<string>();
+  for (const face of existing) {
+    if (matched.has(face.id) || !face.personGroupId) {
+      continue;
+    }
+    for (const [trackIndex, track] of tracks.entries()) {
+      const kept = byId.get(matches.get(trackIndex) ?? '');
+      if (kept?.personGroupId === face.personGroupId && Number.isFinite(matchCost(face, track, options))) {
+        absorbed.add(face.id);
+        break;
+      }
+    }
+  }
+  return absorbed;
 };
 
 const scaleBox = (
@@ -599,12 +642,19 @@ const median = (values: number[]) => {
 };
 
 /**
-Whether a track is a person worth keeping: large enough to recognise (MIN_FACE), and confident once or consistent
-across frames (see VIDEO_FACE_LOW_SCORE).
+Whether a track is a person worth keeping: seen in at least `minSightings` frames, large enough to recognise
+(`minFaceSize`, MIN_FACE by default), and confident once or consistent across frames (see VIDEO_FACE_LOW_SCORE).
 */
-export const acceptTrack = (track: FaceTrack, minScore: number): boolean => {
+export const acceptTrack = (
+  track: FaceTrack,
+  minScore: number,
+  { minFaceSize = MIN_FACE, minSightings = 1 }: { minFaceSize?: number; minSightings?: number } = {},
+): boolean => {
+  if (track.sightings.length < minSightings) {
+    return false;
+  }
   const sizes = track.sightings.map(({ box }) => Math.min(box.x2 - box.x1, box.y2 - box.y1));
-  if (Math.max(...sizes) < MIN_FACE) {
+  if (Math.max(...sizes) < minFaceSize) {
     return false;
   }
   const scores = track.sightings.map((sighting) => sighting.score);

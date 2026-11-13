@@ -40,5 +40,41 @@ describe(PersonService.name, () => {
         expect.objectContaining({ hasPerson: true, excludeOtherFacesOfVideo: face.id }),
       );
     });
+
+    describe('createPeople', () => {
+      const recognise = async ({ createPeople, isVideo }: { createPeople: boolean; isVideo: boolean }) => {
+        const asset = AssetFactory.create();
+        const face = AssetFaceFactory.create({ assetId: asset.id });
+        const group = PersonGroupFactory.create();
+        mocks.systemMetadata.get.mockResolvedValue({
+          machineLearning: { facialRecognition: { minFaces: 1, video: { enabled: true, createPeople } } },
+        });
+        mocks.person.getFaceForFacialRecognitionJob.mockResolvedValue(getForFacialRecognitionJob(face, asset));
+        mocks.search.searchFaces.mockResolvedValueOnce([getForFaceSearch(face, 0)]).mockResolvedValueOnce([]);
+        mocks.videoFace.isVideoFace.mockResolvedValue(isVideo);
+        mocks.person.createGroup.mockResolvedValue(group);
+        mocks.person.create.mockResolvedValue(PersonFactory.create({ personGroupId: group.id }));
+
+        await sut.handleRecognizeFaces({ id: face.id, deferred: true });
+      };
+
+      it('lets a video face start a new person by default', async () => {
+        await recognise({ createPeople: true, isVideo: true });
+
+        expect(mocks.person.createGroup).toHaveBeenCalled();
+      });
+
+      it('never starts a person from a video face when off', async () => {
+        await recognise({ createPeople: false, isVideo: true });
+
+        expect(mocks.person.createGroup).not.toHaveBeenCalled();
+      });
+
+      it('still starts people from photo faces when off', async () => {
+        await recognise({ createPeople: false, isVideo: false });
+
+        expect(mocks.person.createGroup).toHaveBeenCalled();
+      });
+    });
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   FaceTracker,
+  absorbedFaces,
   acceptTrack,
   findAgain,
   isSharpenTimeFor,
@@ -280,6 +281,43 @@ describe('matchExistingFaces', () => {
     expect(matches.size).toBe(2);
   });
 
+  it('keeps the face with a person when several old faces match one track (issue 1306)', () => {
+    const tracks = tracksOf(alice);
+    const existing = [
+      { id: 'unnamed', embedding: alice, hasFrame: true, imageWidth: 1920, imageHeight: 1080, box: box(0) },
+      {
+        id: 'named',
+        embedding: aliceTurned,
+        hasFrame: true,
+        imageWidth: 1920,
+        imageHeight: 1080,
+        box: box(0),
+        personGroupId: 'alice-person',
+      },
+    ];
+
+    expect(matchExistingFaces(existing, tracks, { maxDistance: 0.5, frame, start: 0 }).get(0)).toBe('named');
+  });
+
+  it('finds the old faces a re-scan merged into a face with the same person, and leaves other people alone', () => {
+    const tracks = tracksOf(alice);
+    const face = (id: string, personGroupId: string | null) => ({
+      id,
+      embedding: aliceTurned,
+      hasFrame: true,
+      imageWidth: 1920,
+      imageHeight: 1080,
+      box: box(0),
+      personGroupId,
+    });
+    const existing = [face('kept', 'alice-person'), face('half', 'alice-person'), face('other', 'bob-person')];
+    const options = { maxDistance: 0.5, frame, start: 0 };
+    const matches = matchExistingFaces(existing, tracks, options);
+
+    expect(matches.get(0)).toBe('kept');
+    expect(absorbedFaces(existing, tracks, matches, options)).toEqual(new Set(['half']));
+  });
+
   it('matches an old poster face by position when its embedding is too blurred to match', () => {
     const tracker = new FaceTracker(0.5);
     tracker.addFrame(1, 0, [detection(alice, { x1: 960, y1: 540, x2: 1080, y2: 660 })]);
@@ -365,6 +403,24 @@ describe('acceptTrack', () => {
   it('drops a face too small to recognise however confident the detector was', () => {
     expect(acceptTrack(trackOf({ score: 0.73, size: 12 }), 0.7)).toBe(false);
     expect(acceptTrack(trackOf({ score: 0.73, size: 12 }, { score: 0.6, size: 20 }), 0.7)).toBe(true);
+  });
+
+  it('drops a person seen in fewer frames than the admin’s minimum, however confident', () => {
+    const tracker = new FaceTracker(0.5);
+    tracker.addFrame(1, 0, [detection(alice)]);
+    const [track] = tracker.finish();
+
+    expect(acceptTrack(track, 0.7)).toBe(true);
+    expect(acceptTrack(track, 0.7, { minSightings: 2 })).toBe(false);
+  });
+
+  it('uses the admin’s minimum face size in place of the built-in one', () => {
+    const tracker = new FaceTracker(0.5);
+    tracker.addFrame(1, 0, [detection(alice, box(100, 100, 40))]);
+    const [track] = tracker.finish();
+
+    expect(acceptTrack(track, 0.7)).toBe(true);
+    expect(acceptTrack(track, 0.7, { minFaceSize: 50 })).toBe(false);
   });
 
   it('never asks more of a consistent face than an admin who lowered the photo threshold', () => {

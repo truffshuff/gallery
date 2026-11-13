@@ -14,6 +14,7 @@ import {
   FaceTracker,
   VIDEO_FACE_LOW_SCORE,
   VIDEO_FACE_SAMPLER_VERSION,
+  absorbedFaces,
   acceptTrack,
   findAgain,
   isSharpenTimeFor,
@@ -123,6 +124,19 @@ export class VideoFaceDetector {
     await this.deps.jobRepository.queueAll(jobs);
   }
 
+  /**
+  Whether recognition may start a new person from this face (PersonService.handleRecognizeFaces). With the
+  `createPeople` setting off, a video face is not "core" evidence: it joins a person already found elsewhere, and
+  otherwise stays unassigned, as a face on a hidden asset does.
+  */
+  async mayStartPerson(faceId: string, machineLearning: SystemConfig['machineLearning']): Promise<boolean> {
+    const options = machineLearning.facialRecognition.video;
+    if (!options?.enabled || options.createPeople) {
+      return true;
+    }
+    return !(await this.deps.videoFaceRepository.isVideoFace(faceId));
+  }
+
   async detect(
     id: string,
     machineLearning: SystemConfig['machineLearning'],
@@ -175,10 +189,13 @@ export class VideoFaceDetector {
       minScore: Math.min(facialRecognition.minScore, VIDEO_FACE_LOW_SCORE),
     };
     const startedAt = Date.now();
+    // How alike two views in this video must be to be one person. Its own setting, so recognition can stay strict
+    // without splitting people inside a video (issue 1306).
+    const sameFaceDistance = options.maxDistance;
 
     const tempDir = await mkdtemp(join(tmpdir(), 'gallery-video-faces-'));
     try {
-      const tracker = new FaceTracker(facialRecognition.maxDistance);
+      const tracker = new FaceTracker(sameFaceDistance);
       if (process.env.GALLERY_VIDEO_FACES_DUMP_DIR) {
         await rm(join(process.env.GALLERY_VIDEO_FACES_DUMP_DIR, `${id}.jsonl`), { force: true });
       }
@@ -280,7 +297,12 @@ export class VideoFaceDetector {
       const unmerged: UnmergedPair[] = [];
       const candidates = tracker.finish((pair) => unmerged.push(pair));
       this.logUnmerged(id, unmerged);
-      const tracks = candidates.filter((track) => acceptTrack(track, facialRecognition.minScore));
+      const tracks = candidates.filter((track) =>
+        acceptTrack(track, facialRecognition.minScore, {
+          minFaceSize: options.minFaceSize,
+          minSightings: options.minSightings,
+        }),
+      );
 
       // A few frames around each kept person's best sample, for a sharper view than the once-a-second samples caught.
       // The person is found again by where they were and how they look, so this picks a better view of someone already
@@ -300,7 +322,7 @@ export class VideoFaceDetector {
           if (!isSharpenTimeFor(t, bestTimes[trackIndex])) {
             continue;
           }
-          const found = findAgain(track, detections, facialRecognition.maxDistance);
+          const found = findAgain(track, detections, sameFaceDistance);
           if (!found || found.quality <= track.best.quality) {
             continue;
           }
@@ -311,7 +333,7 @@ export class VideoFaceDetector {
       }
 
       const { added, kept, removed } = await this.applyTracks(asset, tracks, framePaths, frameSize, {
-        maxDistance: facialRecognition.maxDistance,
+        maxDistance: sameFaceDistance,
         start,
         force,
       });
@@ -408,8 +430,11 @@ export class VideoFaceDetector {
       imageWidth: face.imageWidth,
       imageHeight: face.imageHeight,
       box: { x1: face.boundingBoxX1, y1: face.boundingBoxY1, x2: face.boundingBoxX2, y2: face.boundingBoxY2 },
+      personGroupId: face.personGroupId,
     }));
-    const matches = matchExistingFaces(existing, tracks, { maxDistance, frame: frameSize, start });
+    const matchOptions = { maxDistance, frame: frameSize, start };
+    const matches = matchExistingFaces(existing, tracks, matchOptions);
+    const absorbed = absorbedFaces(existing, tracks, matches, matchOptions);
 
     const { StorageService } = await import('../../services/storage.service.js');
     const backend = StorageService.getWriteBackend();
@@ -459,10 +484,13 @@ export class VideoFaceDetector {
       });
     }
 
-    // An unmatched face nobody named goes, as upstream drops faces below the detection threshold. A named one stays:
-    // losing a name the user gave is worse than a duplicate face, which face cleanup can resolve.
+    // An unmatched face nobody named goes, as upstream drops faces below the detection threshold. A named one stays,
+    // as losing a name the user gave is worse than a duplicate face, unless it was merged into a face with the same
+    // person: then the name is kept on that face.
     const matched = new Set(matchedIds);
-    const removed = replaceable.filter((face) => !matched.has(face.id) && !face.personGroupId);
+    const removed = replaceable.filter(
+      (face) => !matched.has(face.id) && (!face.personGroupId || absorbed.has(face.id)),
+    );
     changes.deleteIds = removed.map((face) => face.id);
 
     await this.deps.videoFaceRepository.apply(changes);
