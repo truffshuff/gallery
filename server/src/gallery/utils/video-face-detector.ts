@@ -82,6 +82,8 @@ const humanDuration = (ms: number) =>
     .rescale()
     .toHuman({ unitDisplay: 'narrow' });
 
+const roundDistance = (value: number) => Math.round(value * 1000) / 1000;
+
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 const roundBox = ({ x1, y1, x2, y2 }: BoundingBox) => ({
@@ -295,7 +297,9 @@ export class VideoFaceDetector {
       }
 
       const unmerged: UnmergedPair[] = [];
-      const candidates = tracker.finish((pair) => unmerged.push(pair));
+      const candidates = tracker.finish((pair) => {
+        unmerged.push(pair);
+      });
       this.logUnmerged(id, unmerged);
       const tracks = candidates.filter((track) =>
         acceptTrack(track, facialRecognition.minScore, {
@@ -396,13 +400,12 @@ export class VideoFaceDetector {
     if (pairs.length === 0 || !this.deps.logger.isLevelEnabled(LogLevel.Debug)) {
       return;
     }
-    const round = (value: number) => Math.round(value * 1000) / 1000;
     const shown = pairs.slice(0, UNMERGED_LOG_LIMIT);
     for (const { a, b, centroidDistance, embeddingDistance, sightingDistance, continuous, seenTogether } of shown) {
       this.deps.logger.debug(
-        `Video ${id}: faces best seen at ${round(a.best.t)}s and ${round(b.best.t)}s kept apart ` +
-          `(centroids ${round(centroidDistance)}, best views ${round(embeddingDistance)}, ` +
-          `closest views ${round(sightingDistance)}${continuous ? ', in consecutive samples' : ''}, ` +
+        `Video ${id}: faces best seen at ${roundDistance(a.best.t)}s and ${roundDistance(b.best.t)}s kept apart ` +
+          `(centroids ${roundDistance(centroidDistance)}, best views ${roundDistance(embeddingDistance)}, ` +
+          `closest views ${roundDistance(sightingDistance)}${continuous ? ', in consecutive samples' : ''}, ` +
           `${plural(a.sightings.length, 'sighting')} and ${b.sightings.length}, ` +
           (seenTogether > 0 ? `seen together in ${plural(seenTogether, 'frame')})` : 'too far apart)'),
       );

@@ -318,13 +318,14 @@ export class FaceTracker {
         row.splice(j, 1);
       }
       for (let k = 0; k < tracks.length; k++) {
-        if (k !== i) {
-          const pair = compare(Math.min(i, k), Math.max(i, k));
-          if (k < i) {
-            pairs[k][i] = pair;
-          } else {
-            pairs[i][k] = pair;
-          }
+        if (k === i) {
+          continue;
+        }
+        const pair = compare(Math.min(i, k), Math.max(i, k));
+        if (k < i) {
+          pairs[k][i] = pair;
+        } else {
+          pairs[i][k] = pair;
         }
       }
     }
@@ -433,16 +434,23 @@ const mergeTracks = (a: MutableTrack, b: MutableTrack): MutableTrack => {
       byFrame.set(sighting.frameIndex, sighting);
     }
   }
-  const sightings = [...byFrame.values()].sort((x, y) => x.t - y.t);
+  const sightings = byFrame
+    .values()
+    .toArray()
+    .sort((x, y) => x.t - y.t);
   const sum = sightings[0].embedding.map(() => 0);
+  let best = sightings[0];
   for (const sighting of sightings) {
     for (let i = 0; i < sum.length; i++) {
       sum[i] += sighting.embedding[i];
     }
+    if (sighting.quality > best.quality) {
+      best = sighting;
+    }
   }
   return {
     sightings,
-    best: sightings.reduce((best, sighting) => (sighting.quality > best.quality ? sighting : best)),
+    best,
     last: sightings.at(-1)!,
     sum,
     centroid: normalize(sum),
@@ -699,7 +707,7 @@ export const mergeDetections = <T extends { boundingBox: BoundingBox; score: num
     const isSameFace = (other: T) =>
       iou(other.boundingBox, detection.boundingBox) > TILE_MERGE_IOU ||
       overlapOfSmaller(other.boundingBox, detection.boundingBox) > TILE_CONTAINED;
-    if (!kept.some((other) => isSameFace(other))) {
+    if (kept.every((other) => !isSameFace(other))) {
       kept.push(detection);
     }
   }

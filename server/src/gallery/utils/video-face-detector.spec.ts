@@ -117,6 +117,16 @@ describe('VideoFaceDetector', () => {
     });
   };
 
+  /** Video face settings over the defaults, and recognition settings beside them. */
+  const withVideo = (video: Record<string, unknown>, recognition: Record<string, unknown> = {}) =>
+    mocks.systemMetadata.get.mockResolvedValue({
+      machineLearning: {
+        facialRecognition: {
+          ...recognition,
+          video: { ...videoConfig.machineLearning.facialRecognition.video, ...video },
+        },
+      },
+    });
   /** ML responses for the first sampled frames, in order (66 s at a 2 s interval samples 1, 3, 5, ... 65). */
   const framesShow = (...frames: ReturnType<typeof face>[][]) => {
     for (const faces of frames) {
@@ -456,15 +466,6 @@ describe('VideoFaceDetector', () => {
   });
 
   describe('admin settings', () => {
-    const withVideo = (video: Record<string, unknown>, recognition: Record<string, unknown> = {}) =>
-      mocks.systemMetadata.get.mockResolvedValue({
-        machineLearning: {
-          facialRecognition: {
-            ...recognition,
-            video: { ...videoConfig.machineLearning.facialRecognition.video, ...video },
-          },
-        },
-      });
     // 0.4 from alice: the same person at the default 0.5, two people at recognition's stricter 0.3.
     const aliceTurned = normalize([0.6, 0.8, 0, 0]);
 

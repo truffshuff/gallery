@@ -224,7 +224,11 @@ describe('FaceTracker', () => {
     tracker.addFrame(5, 2, [detection(bob, box(500))]);
     const pairs: UnmergedPair[] = [];
 
-    expect(tracker.finish((pair) => pairs.push(pair))).toHaveLength(3);
+    expect(
+      tracker.finish((pair) => {
+        pairs.push(pair);
+      }),
+    ).toHaveLength(3);
     expect(pairs).toHaveLength(1);
     expect(pairs[0]).toMatchObject({ seenTogether: 2 });
     expect(pairs[0].embeddingDistance).toBeCloseTo(0.2);
@@ -263,6 +267,16 @@ const tracksOf = (...people: number[][]) => {
   return tracker.finish();
 };
 
+/** An old face whose embedding matches alice's track, with the given person. */
+const oldAliceFace = (id: string, personGroupId: string | null) => ({
+  id,
+  embedding: aliceTurned,
+  hasFrame: true,
+  imageWidth: 1920,
+  imageHeight: 1080,
+  box: box(0),
+  personGroupId,
+});
 describe('matchExistingFaces', () => {
   const frame = { width: 1920, height: 1080 };
 
@@ -301,16 +315,11 @@ describe('matchExistingFaces', () => {
 
   it('finds the old faces a re-scan merged into a face with the same person, and leaves other people alone', () => {
     const tracks = tracksOf(alice);
-    const face = (id: string, personGroupId: string | null) => ({
-      id,
-      embedding: aliceTurned,
-      hasFrame: true,
-      imageWidth: 1920,
-      imageHeight: 1080,
-      box: box(0),
-      personGroupId,
-    });
-    const existing = [face('kept', 'alice-person'), face('half', 'alice-person'), face('other', 'bob-person')];
+    const existing = [
+      oldAliceFace('kept', 'alice-person'),
+      oldAliceFace('half', 'alice-person'),
+      oldAliceFace('other', 'bob-person'),
+    ];
     const options = { maxDistance: 0.5, frame, start: 0 };
     const matches = matchExistingFaces(existing, tracks, options);
 
