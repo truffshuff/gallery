@@ -6,7 +6,7 @@ import { DiskStorageBackend } from 'src/backends/disk-storage.backend.js';
 import { JOBS_ASSET_PAGINATION_SIZE } from 'src/constants.js';
 import { StorageCore } from 'src/cores/storage.core.js';
 import type { SystemConfig } from 'src/dtos/config.dto.js';
-import { AssetType, JobName, JobStatus, SourceType, StorageFolder } from 'src/enum.js';
+import { AssetType, JobName, JobStatus, LogLevel, SourceType, StorageFolder } from 'src/enum.js';
 import type { VideoFaceChanges, VideoFaceRepository } from 'src/gallery/repositories/video-face.repository.js';
 import type { BackendMediaServer } from 'src/gallery/utils/backend-media-server.js';
 import { getRelativeNestedPath } from 'src/gallery/utils/storage-keys.js';
@@ -30,6 +30,7 @@ import {
   withSighting,
   type Detection,
   type ExistingVideoFace,
+  type UnmergedPair,
 } from 'src/gallery/utils/video-faces.js';
 import { VideoFrameReader } from 'src/gallery/utils/video-frames.js';
 import { StorageBackend } from 'src/interfaces/storage-backend.interface.js';
@@ -71,6 +72,9 @@ only their start and finish, so a library of phone clips does not flood the log.
 */
 const PROGRESS_MIN_FRAMES = 100;
 const PROGRESS_STEP_PERCENT = 10;
+
+/** Near-miss face pairs logged per video at debug level; a crowd scene could otherwise log hundreds. */
+const UNMERGED_LOG_LIMIT = 20;
 
 const humanDuration = (ms: number) =>
   Duration.fromMillis(Math.max(1000, Math.round(ms / 1000) * 1000))
@@ -273,7 +277,9 @@ export class VideoFaceDetector {
         return;
       }
 
-      const candidates = tracker.finish();
+      const unmerged: UnmergedPair[] = [];
+      const candidates = tracker.finish((pair) => unmerged.push(pair));
+      this.logUnmerged(id, unmerged);
       const tracks = candidates.filter((track) => acceptTrack(track, facialRecognition.minScore));
 
       // A few frames around each kept person's best sample, for a sharper view than the once-a-second samples caught.
@@ -358,6 +364,31 @@ export class VideoFaceDetector {
       }
     }
     return mergeDetections(found);
+  }
+
+  /**
+  Debug log of the face pairs the final merge left apart near its threshold, and why: the evidence for tuning
+  `maxDistance`, or for finding one person split in two (issue 1306).
+  */
+  private logUnmerged(id: string, pairs: UnmergedPair[]) {
+    if (pairs.length === 0 || !this.deps.logger.isLevelEnabled(LogLevel.Debug)) {
+      return;
+    }
+    const round = (value: number) => Math.round(value * 1000) / 1000;
+    const shown = pairs.slice(0, UNMERGED_LOG_LIMIT);
+    for (const { a, b, centroidDistance, embeddingDistance, seenTogether } of shown) {
+      this.deps.logger.debug(
+        `Video ${id}: faces best seen at ${round(a.best.t)}s and ${round(b.best.t)}s kept apart ` +
+          `(centroids ${round(centroidDistance)}, best views ${round(embeddingDistance)}, ` +
+          `${plural(a.sightings.length, 'sighting')} and ${b.sightings.length}, ` +
+          (seenTogether > 0 ? `seen together in ${plural(seenTogether, 'frame')})` : 'too far apart)'),
+      );
+    }
+    if (pairs.length > shown.length) {
+      this.deps.logger.debug(
+        `Video ${id}: ${pairs.length - shown.length} more face pairs kept apart near the threshold`,
+      );
+    }
   }
 
   private async applyTracks(

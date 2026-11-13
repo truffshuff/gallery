@@ -4,7 +4,7 @@ import type { BoundingBox } from 'src/repositories/machine-learning.repository.j
 // detections are the same person, which view of them is best, and which existing face a new one replaces.
 
 /** Bumped when sampling or tracking changes enough that videos should be rescanned. */
-export const VIDEO_FACE_SAMPLER_VERSION = 2;
+export const VIDEO_FACE_SAMPLER_VERSION = 3;
 
 /**
 Relaxation of the distance threshold for a detection where the track was in the previous sample: its centre within
@@ -60,6 +60,8 @@ const CONTEXT_MAX_FACTOR = 2.5;
 const TILE_MIN_LONG_EDGE = 960;
 const TILE_OVERLAP = 0.15;
 const TILE_MERGE_IOU = 0.4;
+/** A find mostly inside another is that face cut by a quarter's edge, whatever their IoU. */
+const TILE_CONTAINED = 0.8;
 
 /** The sampling interval for a span: at least once a second for a short clip, else the configured one. */
 export const sampleIntervalFor = (span: number, interval: number) =>
@@ -164,6 +166,19 @@ export type FaceTrack = {
 
 type MutableTrack = FaceTrack & { sum: number[]; last: Sighting };
 
+/** A pair of tracks the final merge left apart, reported for the debug log. */
+export type UnmergedPair = {
+  a: FaceTrack;
+  b: FaceTrack;
+  centroidDistance: number;
+  embeddingDistance: number;
+  /** Frames both are seen in at different places; 0 when only the distance kept them apart. */
+  seenTogether: number;
+};
+
+/** Pairs left apart this close to the merge threshold are reported, as the ones a threshold change would decide. */
+const NEAR_MISS = 0.1;
+
 /**
 Groups detections into one track per person, frame by frame in time order. A detection joins the nearest track
 by embedding (its centroid or its latest sighting), with a looser threshold when it is where that track was in the
@@ -231,26 +246,70 @@ export class FaceTracker {
     return assigned;
   }
 
-  /** The tracks, after merging pairs that are the same person seen apart (never in the same frame). */
-  finish(): FaceTrack[] {
-    let merged = true;
-    while (merged) {
-      merged = false;
-      outer: for (let i = 0; i < this.tracks.length; i++) {
-        for (let j = i + 1; j < this.tracks.length; j++) {
-          const a = this.tracks[i];
-          const b = this.tracks[j];
-          if (cosineDistance(a.centroid, b.centroid) >= this.maxDistance || coOccur(a, b)) {
+  /**
+  The tracks, after merging pairs that are the same person seen apart, closest pair first. Two tracks are compared by
+  the nearer of their centroids and their best few sightings (the embedding a face is stored with), so a track whose
+  centroid was dragged off by sideways or blurred views still meets its other half. Tracks seen together in a frame
+  are two people and never merge, unless every such frame shows them in the same place: that is one face found twice.
+  `report` hears about every pair left apart within `NEAR_MISS` of the threshold, and why, for the debug log.
+  */
+  finish(report?: (pair: UnmergedPair) => void): FaceTrack[] {
+    const tracks = this.tracks;
+    const embeddings = tracks.map((track) => trackEmbedding(track));
+    const distance = (i: number, j: number) =>
+      Math.min(cosineDistance(tracks[i].centroid, tracks[j].centroid), cosineDistance(embeddings[i], embeddings[j]));
+    const distances = tracks.map((_, i) => tracks.map((_, j) => (i === j ? Infinity : distance(i, j))));
+
+    for (;;) {
+      const candidates: { i: number; j: number; distance: number }[] = [];
+      for (let i = 0; i < tracks.length; i++) {
+        for (let j = i + 1; j < tracks.length; j++) {
+          if (distances[i][j] < this.maxDistance) {
+            candidates.push({ i, j, distance: distances[i][j] });
+          }
+        }
+      }
+      const pair = candidates
+        .sort((a, b) => a.distance - b.distance)
+        .find(({ i, j }) => seenTogether(tracks[i], tracks[j]) === 0);
+      if (!pair) {
+        break;
+      }
+
+      const { i, j } = pair;
+      tracks[i] = mergeTracks(tracks[i], tracks[j]);
+      embeddings[i] = trackEmbedding(tracks[i]);
+      tracks.splice(j, 1);
+      embeddings.splice(j, 1);
+      distances.splice(j, 1);
+      for (const row of distances) {
+        row.splice(j, 1);
+      }
+      for (let k = 0; k < tracks.length; k++) {
+        const value = k === i ? Infinity : distance(i, k);
+        distances[i][k] = value;
+        distances[k][i] = value;
+      }
+    }
+
+    if (report) {
+      for (let i = 0; i < tracks.length; i++) {
+        for (let j = i + 1; j < tracks.length; j++) {
+          if (distances[i][j] >= this.maxDistance + NEAR_MISS) {
             continue;
           }
-          this.tracks[i] = mergeTracks(a, b);
-          this.tracks.splice(j, 1);
-          merged = true;
-          break outer;
+          report({
+            a: tracks[i],
+            b: tracks[j],
+            centroidDistance: cosineDistance(tracks[i].centroid, tracks[j].centroid),
+            embeddingDistance: cosineDistance(embeddings[i], embeddings[j]),
+            seenTogether: seenTogether(tracks[i], tracks[j]),
+          });
         }
       }
     }
-    return this.tracks.map(({ sightings, best, centroid }) => ({ sightings, best, centroid }));
+
+    return tracks.map(({ sightings, best, centroid }) => ({ sightings, best, centroid }));
   }
 
   /** People found so far, before the final merge: what progress reports. */
@@ -272,17 +331,49 @@ const nearby = (a: BoundingBox, b: BoundingBox) => {
   return drift <= larger && larger <= Math.min(sizeA, sizeB) * CONTINUITY_MAX_SIZE_RATIO;
 };
 
-const coOccur = (a: FaceTrack, b: FaceTrack) => {
-  const frames = new Set(a.sightings.map((sighting) => sighting.frameIndex));
-  return b.sightings.some((sighting) => frames.has(sighting.frameIndex));
+/** How much of the smaller box the two boxes share: 1 when one holds the other. */
+const overlapOfSmaller = (a: BoundingBox, b: BoundingBox) => {
+  const width = Math.max(0, Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1));
+  const height = Math.max(0, Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1));
+  const smaller = Math.min((a.x2 - a.x1) * (a.y2 - a.y1), (b.x2 - b.x1) * (b.y2 - b.y1));
+  return smaller > 0 ? (width * height) / smaller : 0;
 };
 
+/** Two sightings in one frame this much on top of each other are one face found twice, not two people. */
+const SAME_FACE_OVERLAP = 0.5;
+
+/** The frames two tracks are both seen in at different places: each one is proof they are two people. */
+const seenTogether = (a: FaceTrack, b: FaceTrack) => {
+  const byFrame = new Map(a.sightings.map((sighting) => [sighting.frameIndex, sighting]));
+  let count = 0;
+  for (const sighting of b.sightings) {
+    const other = byFrame.get(sighting.frameIndex);
+    if (other && overlapOfSmaller(other.box, sighting.box) < SAME_FACE_OVERLAP) {
+      count++;
+    }
+  }
+  return count;
+};
+
+/** One track from two. A frame both were found in (in the same place) keeps its better sighting. */
 const mergeTracks = (a: MutableTrack, b: MutableTrack): MutableTrack => {
-  const sightings = [...a.sightings, ...b.sightings].sort((x, y) => x.t - y.t);
-  const sum = a.sum.map((value, i) => value + b.sum[i]);
+  const byFrame = new Map<number, Sighting>();
+  for (const sighting of [...a.sightings, ...b.sightings]) {
+    const other = byFrame.get(sighting.frameIndex);
+    if (!other || sighting.quality > other.quality) {
+      byFrame.set(sighting.frameIndex, sighting);
+    }
+  }
+  const sightings = [...byFrame.values()].sort((x, y) => x.t - y.t);
+  const sum = sightings[0].embedding.map(() => 0);
+  for (const sighting of sightings) {
+    for (let i = 0; i < sum.length; i++) {
+      sum[i] += sighting.embedding[i];
+    }
+  }
   return {
     sightings,
-    best: a.best.quality >= b.best.quality ? a.best : b.best,
+    best: sightings.reduce((best, sighting) => (sighting.quality > best.quality ? sighting : best)),
     last: sightings.at(-1)!,
     sum,
     centroid: normalize(sum),
@@ -487,7 +578,10 @@ same face found twice, and the more confident one is kept.
 export const mergeDetections = <T extends { boundingBox: BoundingBox; score: number }>(detections: T[]): T[] => {
   const kept: T[] = [];
   for (const detection of [...detections].sort((a, b) => b.score - a.score)) {
-    if (kept.every((other) => iou(other.boundingBox, detection.boundingBox) <= TILE_MERGE_IOU)) {
+    const isSameFace = (other: T) =>
+      iou(other.boundingBox, detection.boundingBox) > TILE_MERGE_IOU ||
+      overlapOfSmaller(other.boundingBox, detection.boundingBox) > TILE_CONTAINED;
+    if (!kept.some((other) => isSameFace(other))) {
       kept.push(detection);
     }
   }

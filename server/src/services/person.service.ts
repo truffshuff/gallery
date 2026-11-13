@@ -829,6 +829,7 @@ export class PersonService extends BaseService {
         maxDistance: machineLearning.facialRecognition.maxDistance,
         numResults: machineLearning.facialRecognition.minFaces,
         minBirthDate: new Date(face.asset.fileCreatedAt),
+        excludeOtherFacesOfVideo: face.id,
       });
 
       this.logger.debug(`Face ${id} has ${matches.length} matches`);
@@ -879,6 +880,7 @@ export class PersonService extends BaseService {
           numResults: 1,
           hasPerson: true,
           minBirthDate: new Date(face.asset.fileCreatedAt),
+          excludeOtherFacesOfVideo: face.id,
         });
 
         personGroupId = matchWithPerson?.personGroupId ?? undefined;
