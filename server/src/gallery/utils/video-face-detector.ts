@@ -376,10 +376,11 @@ export class VideoFaceDetector {
     }
     const round = (value: number) => Math.round(value * 1000) / 1000;
     const shown = pairs.slice(0, UNMERGED_LOG_LIMIT);
-    for (const { a, b, centroidDistance, embeddingDistance, seenTogether } of shown) {
+    for (const { a, b, centroidDistance, embeddingDistance, sightingDistance, continuous, seenTogether } of shown) {
       this.deps.logger.debug(
         `Video ${id}: faces best seen at ${round(a.best.t)}s and ${round(b.best.t)}s kept apart ` +
           `(centroids ${round(centroidDistance)}, best views ${round(embeddingDistance)}, ` +
+          `closest views ${round(sightingDistance)}${continuous ? ', in consecutive samples' : ''}, ` +
           `${plural(a.sightings.length, 'sighting')} and ${b.sightings.length}, ` +
           (seenTogether > 0 ? `seen together in ${plural(seenTogether, 'frame')})` : 'too far apart)'),
       );

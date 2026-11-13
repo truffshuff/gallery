@@ -166,18 +166,39 @@ export type FaceTrack = {
 
 type MutableTrack = FaceTrack & { sum: number[]; last: Sighting };
 
-/** A pair of tracks the final merge left apart, reported for the debug log. */
-export type UnmergedPair = {
-  a: FaceTrack;
-  b: FaceTrack;
+/** What the final merge knows about two tracks (`comparePair`). */
+type PairEvidence = {
   centroidDistance: number;
+  /** Between their stored embeddings: the normalised mean of each one's best few sightings. */
   embeddingDistance: number;
-  /** Frames both are seen in at different places; 0 when only the distance kept them apart. */
+  /** The nearer of the two above: what pairs are ranked by. */
+  distance: number;
+  /** Between the closest two of their best sightings, one from each. */
+  sightingDistance: number;
+  /** Seen in consecutive samples in the same place. */
+  continuous: boolean;
+  /** Frames both are seen in at different places: each one is proof they are two people. */
   seenTogether: number;
+  mergeable: boolean;
 };
+
+/** A pair of tracks the final merge left apart, reported for the debug log. */
+export type UnmergedPair = { a: FaceTrack; b: FaceTrack } & Omit<PairEvidence, 'mergeable' | 'distance'>;
 
 /** Pairs left apart this close to the merge threshold are reported, as the ones a threshold change would decide. */
 const NEAR_MISS = 0.1;
+
+/**
+Two tracks merge when a sighting of each is within this fraction of `maxDistance` (0.3 at the default 0.5): as close
+as two frames of one person a second apart usually are, and closer than two different people's faces come.
+*/
+const SIGHTING_LINK = 0.6;
+
+/** Sightings per track compared for `SIGHTING_LINK`: its best ones, which keeps a long track's cost bounded. */
+const LINK_SIGHTINGS = 8;
+
+/** Tracks further apart than this on their centroids are never compared sighting by sighting. */
+const LINK_MAX_CENTROID_DISTANCE = 1;
 
 /**
 Groups detections into one track per person, frame by frame in time order. A detection joins the nearest track
@@ -247,64 +268,73 @@ export class FaceTracker {
   }
 
   /**
-  The tracks, after merging pairs that are the same person seen apart, closest pair first. Two tracks are compared by
-  the nearer of their centroids and their best few sightings (the embedding a face is stored with), so a track whose
-  centroid was dragged off by sideways or blurred views still meets its other half. Tracks seen together in a frame
-  are two people and never merge, unless every such frame shows them in the same place: that is one face found twice.
-  `report` hears about every pair left apart within `NEAR_MISS` of the threshold, and why, for the debug log.
+  The tracks, after merging pairs that are the same person seen apart, closest pair first. Tracks seen together in a
+  frame are two people and never merge, unless every such frame shows them in the same place: one face found twice.
+  Any other pair merges on the first of three kinds of evidence (`comparePair`):
+
+  - looks: the nearer of their centroids and their best few sightings (the embedding a face is stored with) is under
+    `maxDistance`, so a track whose centroid sideways or blurred views dragged off still meets its other half;
+  - continuity: one was seen in the sample right after the other, in the same place, within the relaxed threshold the
+    tracker itself applies from one sample to the next, for a person who turned their head between two samples;
+  - one shared view: a sighting of each is as close as two frames of one person a second apart usually are
+    (`SIGHTING_LINK` of `maxDistance`), however far their other views wandered.
+
+  `report` hears about every pair left apart near the threshold, and why, for the debug log.
   */
   finish(report?: (pair: UnmergedPair) => void): FaceTrack[] {
     const tracks = this.tracks;
-    const embeddings = tracks.map((track) => trackEmbedding(track));
-    const distance = (i: number, j: number) =>
-      Math.min(cosineDistance(tracks[i].centroid, tracks[j].centroid), cosineDistance(embeddings[i], embeddings[j]));
-    const distances = tracks.map((_, i) => tracks.map((_, j) => (i === j ? Infinity : distance(i, j))));
+    let summaries = tracks.map((track) => summarize(track));
+    const compare = (i: number, j: number) => comparePair(summaries[i], summaries[j], this.maxDistance);
+    const pairs: PairEvidence[][] = tracks.map(() => []);
+    for (let i = 0; i < tracks.length; i++) {
+      for (let j = i + 1; j < tracks.length; j++) {
+        pairs[i][j] = compare(i, j);
+      }
+    }
+    const pairAt = (i: number, j: number) => (i < j ? pairs[i][j] : pairs[j][i]);
 
     for (;;) {
-      const candidates: { i: number; j: number; distance: number }[] = [];
+      let next: { i: number; j: number; distance: number } | undefined;
       for (let i = 0; i < tracks.length; i++) {
         for (let j = i + 1; j < tracks.length; j++) {
-          if (distances[i][j] < this.maxDistance) {
-            candidates.push({ i, j, distance: distances[i][j] });
+          const pair = pairs[i][j];
+          if (pair.mergeable && (!next || pair.distance < next.distance)) {
+            next = { i, j, distance: pair.distance };
           }
         }
       }
-      const pair = candidates
-        .sort((a, b) => a.distance - b.distance)
-        .find(({ i, j }) => seenTogether(tracks[i], tracks[j]) === 0);
-      if (!pair) {
+      if (!next) {
         break;
       }
 
-      const { i, j } = pair;
+      const { i, j } = next;
       tracks[i] = mergeTracks(tracks[i], tracks[j]);
-      embeddings[i] = trackEmbedding(tracks[i]);
       tracks.splice(j, 1);
-      embeddings.splice(j, 1);
-      distances.splice(j, 1);
-      for (const row of distances) {
+      summaries = [...summaries.slice(0, j), ...summaries.slice(j + 1)];
+      summaries[i] = summarize(tracks[i]);
+      pairs.splice(j, 1);
+      for (const row of pairs) {
         row.splice(j, 1);
       }
       for (let k = 0; k < tracks.length; k++) {
-        const value = k === i ? Infinity : distance(i, k);
-        distances[i][k] = value;
-        distances[k][i] = value;
+        if (k !== i) {
+          const pair = compare(Math.min(i, k), Math.max(i, k));
+          if (k < i) {
+            pairs[k][i] = pair;
+          } else {
+            pairs[i][k] = pair;
+          }
+        }
       }
     }
 
     if (report) {
       for (let i = 0; i < tracks.length; i++) {
         for (let j = i + 1; j < tracks.length; j++) {
-          if (distances[i][j] >= this.maxDistance + NEAR_MISS) {
-            continue;
+          const pair = pairAt(i, j);
+          if (pair.distance < this.maxDistance + NEAR_MISS) {
+            report({ a: tracks[i], b: tracks[j], ...pair });
           }
-          report({
-            a: tracks[i],
-            b: tracks[j],
-            centroidDistance: cosineDistance(tracks[i].centroid, tracks[j].centroid),
-            embeddingDistance: cosineDistance(embeddings[i], embeddings[j]),
-            seenTogether: seenTogether(tracks[i], tracks[j]),
-          });
         }
       }
     }
@@ -342,17 +372,55 @@ const overlapOfSmaller = (a: BoundingBox, b: BoundingBox) => {
 /** Two sightings in one frame this much on top of each other are one face found twice, not two people. */
 const SAME_FACE_OVERLAP = 0.5;
 
-/** The frames two tracks are both seen in at different places: each one is proof they are two people. */
-const seenTogether = (a: FaceTrack, b: FaceTrack) => {
-  const byFrame = new Map(a.sightings.map((sighting) => [sighting.frameIndex, sighting]));
-  let count = 0;
-  for (const sighting of b.sightings) {
-    const other = byFrame.get(sighting.frameIndex);
+type TrackSummary = {
+  track: FaceTrack;
+  embedding: number[];
+  linkSightings: Sighting[];
+  byFrame: Map<number, Sighting>;
+};
+
+const summarize = (track: FaceTrack): TrackSummary => ({
+  track,
+  embedding: trackEmbedding(track),
+  linkSightings: [...track.sightings].sort((a, b) => b.quality - a.quality).slice(0, LINK_SIGHTINGS),
+  byFrame: new Map(track.sightings.map((sighting) => [sighting.frameIndex, sighting])),
+});
+
+const comparePair = (a: TrackSummary, b: TrackSummary, maxDistance: number): PairEvidence => {
+  const centroidDistance = cosineDistance(a.track.centroid, b.track.centroid);
+  const embeddingDistance = cosineDistance(a.embedding, b.embedding);
+  const distance = Math.min(centroidDistance, embeddingDistance);
+
+  let seenTogether = 0;
+  let continuous = false;
+  for (const sighting of b.track.sightings) {
+    const other = a.byFrame.get(sighting.frameIndex);
     if (other && overlapOfSmaller(other.box, sighting.box) < SAME_FACE_OVERLAP) {
-      count++;
+      seenTogether++;
+    }
+    for (const step of [-1, 1]) {
+      const neighbour = a.byFrame.get(sighting.frameIndex + step);
+      if (neighbour && !b.byFrame.has(neighbour.frameIndex) && nearby(neighbour.box, sighting.box)) {
+        continuous = true;
+      }
     }
   }
-  return count;
+
+  let sightingDistance = Infinity;
+  if (centroidDistance < LINK_MAX_CENTROID_DISTANCE) {
+    for (const x of a.linkSightings) {
+      for (const y of b.linkSightings) {
+        sightingDistance = Math.min(sightingDistance, cosineDistance(x.embedding, y.embedding));
+      }
+    }
+  }
+
+  const mergeable =
+    seenTogether === 0 &&
+    (distance < maxDistance ||
+      (continuous && distance < maxDistance + CONTINUITY_RELAXATION) ||
+      sightingDistance < maxDistance * SIGHTING_LINK);
+  return { centroidDistance, embeddingDistance, distance, sightingDistance, continuous, seenTogether, mergeable };
 };
 
 /** One track from two. A frame both were found in (in the same place) keeps its better sighting. */
