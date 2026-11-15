@@ -82,6 +82,11 @@ people found to 24. It takes about five times as long per frame, so leave it off
   facial recognition setting **Minimum recognized faces** asks for, before they get their own entry in People.
 - **You can see every moment a person appears,** and jump the video to each one. See
   [Seeing where someone appears](#seeing-where-someone-appears).
+- **Two people on screen together are never the same person.** When recognition would give two faces seen in the
+  same frame to one person, only the first keeps that person, and the other is matched to its next closest person or
+  stays unnamed. This stops small or blurry faces in a group, such as a choir or a car's interior camera, from all
+  landing on one person. In a collage video, where one person can be in two photos at once, the second copy stays
+  unnamed.
 
 Low-resolution and very blurry videos have limits. If a person is only ever a few pixels wide, or never in focus, no
 frame will show them clearly.
@@ -168,8 +173,16 @@ Found 7 faces in 23 frames of video <id> in 27s: 0 added, 7 updated, 0 deleted, 
 Videos sampled from 100 frames or more also log their progress every 10%, with an estimate of the time left.
 
 At the `debug` log level, each video also lists the pairs of faces it kept apart although they look alike, closest
-first and by face id, with the reason: seen on screen together, or too far apart. If one person keeps showing up as
-several faces in a video, these lines show why.
+first and by face id. Each line says why: seen on screen together (one person can't be in a frame twice), too far
+apart in looks, or both. It also says in how many frames each face was seen, and how many of those views were
+confident. If one person keeps showing up as several faces in a video, these lines show why:
+
+```
+Video <id>: faces <id> and <id> kept apart: seen together in 1 frame, and too far apart. Distances: centroids 0.555, best views 0.558, stored 0.567. First face best seen at 10s, in 16 frames, 3 confident; second face best seen at 22.5s, in 1 frame, 1 confident.
+```
+
+A pair of faces of one person that stayed apart usually shows as "too far apart" with a low `stored` distance, or
+with "best views not confident" when neither face had a confident view.
 
 Each face found this way stores one frame, about 200 to 400 KB, next to the video's thumbnails. Deleting the video
 deletes its frames.

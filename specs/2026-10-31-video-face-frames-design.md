@@ -142,9 +142,11 @@ or the user ties them to the same person.
 
 The debug log lists the pairs of faces left apart near the threshold, closest first (20 per video, then a count), so
 a split face can be traced to why it was not merged. Each line names both faces by id, so it can be matched with a
-query on `asset_face`, and gives the reason (seen together, and in how many of those frames the boxes overlap as one
-face found twice would; or too far apart, and whether the best views were confident), the centroid, best-view and
-stored-embedding distances, and each face's sightings and how many were confident. The stored distance is what
+query on `asset_face`, and gives every reason that applies: seen together, with how many of those frames have the boxes
+overlapping as one face found twice would; and too far apart, with whether the best views were confident. A pair
+seen together is often also too far apart, and naming only the first reason read as if the shared frame alone had
+kept two lookalikes apart. Then come the centroid, best-view and stored-embedding distances, and for each face its
+best time, the frames it was seen in, and how many of those views were confident. The stored distance is what
 recognition and a query on `face_search` see: it averages the best three views whatever their score, so it can be
 well under the threshold for a pair the merge saw apart on centroids (issue 1306: two faces of one person in a phone
 video, 0.237 apart stored, never merged and never logged, since the old log took the first 20 pairs in track order and
@@ -367,6 +369,20 @@ Without it (issue 1306), the faces the tracker kept apart vouched for each other
 video reached `minFaces: 3` on their own and founded a person nobody else matched: 188 of 339 new people in the
 reporter's library came from exactly one video. And a face could take the person of another face it had been kept
 apart from because both were on screen together, which is proof they are two people.
+
+The same filter has a second rule: a person who already has a face seen together with this one (a stored sighting at
+the same time, the tracker's own evidence) is left out entirely, with all of that person's faces, so the face matches
+its next nearest person or none. Leaving out the other face alone was not enough: that person's photos still matched.
+On a copy of the maintainer's library, small and blurry faces, whose embeddings crowd together, went to whoever was
+nearest. Four singers of a choir landed on one unnamed person, 0.07 to 0.22 apart. A driver and a passenger in two
+dashcam videos landed on one named person, as did two children at a belt ceremony and two guests at a dim cake cutting.
+Simulated on that copy, faces without such a conflict keep the person they had. The rule leaves photos alone, since a
+photo face has no video frame row.
+
+Two costs are accepted. In collage videos one person can really be in two photos on screen at once; the second copy
+then keeps no person, which loses nothing the first copy does not show. And the first face recognised keeps the
+person: if the passenger's face is processed before the driver's, the driver's face is the one that moves on.
+Recognition runs in track order, without comparing which of the two is closer to the person.
 
 
 `machineLearning.facialRecognition.video`, beside the fork's `suggestions` (both spread from
